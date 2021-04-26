@@ -31,7 +31,6 @@ def subl(*args):
 
     sublime.set_timeout(on_activated, 300)
 
-
 def expand_path(path, relative_to=None):
     root = None
     if relative_to:
@@ -99,16 +98,11 @@ class Manager:
             sublime.packages_path(), 'User', 'Projects')
         user_projects_dirs = self.settings.get('projects_path')
 
-        self.projects_path = []
+        self.projects_path = [default_projects_dir]
         for folder in user_projects_dirs:
-            if os.path.isdir(os.path.expanduser(folder)):
-                self.projects_path.append(folder)
-
-        if not self.projects_path:
-            self.projects_path = [default_projects_dir]
-
-        self.projects_path = [
-            os.path.normpath(os.path.expanduser(d)) for d in self.projects_path]
+            expanded_folder_path=os.path.expanduser(folder)
+            if os.path.isdir(expanded_folder_path):
+                self.projects_path.append(expanded_folder_path)
 
         node = computer_name()
         if self.settings.get('use_local_projects_dir', False):
@@ -124,16 +118,11 @@ class Manager:
 
     def load_sublime_project_files(self, folder):
         pfiles = []
-        for path, dirs, files in os.walk(folder, followlinks=True):
+        for path, dirs, files in walklevel(folder, self.settings.get('search_depth', -1)):
             for f in files:
                 f = os.path.join(path, f)
                 if f.endswith('.sublime-project') and f not in pfiles:
                     pfiles.append(os.path.normpath(f))
-            # remove empty directories
-            for d in dirs:
-                d = os.path.join(path, d)
-                if len(os.listdir(d)) == 0:
-                    os.rmdir(d)
         return pfiles
 
     def load_library(self, folder):
@@ -492,6 +481,35 @@ def cancellable(func):
             sublime.set_timeout(self.run, 10)
     return _ret
 
+#src: https://gist.github.com/TheMatt2/faf5ca760c61a267412c46bb977718fa#file-walklevel-py
+def walklevel(path, depth = 1):
+    """It works like os.walk, but you can pass it a level parameter
+       that indicates how deep the recursion will go.
+       If depth is 1, the current directory is listed.
+       If depth is 0, nothing is returned.
+       If depth is -1 (or less than 0), the full depth is walked.
+    """
+    # If depth is negative, just walk
+    # Not using yield from for python2 compat
+    # and copy dirs to keep consistant behavior for depth = -1 and depth = inf
+    if depth < 0:
+        for root, dirs, files in os.walk(path, followlinks=True):
+            yield root, dirs[:], files
+        return
+    elif depth == 0:
+        return
+
+    # path.count(os.path.sep) is safe because
+    # - On Windows "\\" is never allowed in the name of a file or directory
+    # - On UNIX "/" is never allowed in the name of a file or directory
+    # - On MacOS a literal "/" is quitely translated to a ":" so it is still
+    #   safe to count "/".
+    base_depth = path.rstrip(os.path.sep).count(os.path.sep)
+    for root, dirs, files in os.walk(path, followlinks=True):
+        yield root, dirs[:], files
+        cur_depth = root.count(os.path.sep)
+        if base_depth + depth <= cur_depth:
+            del dirs[:]
 
 class ProjectManagerCloseProject(sublime_plugin.WindowCommand):
     def run(self):
